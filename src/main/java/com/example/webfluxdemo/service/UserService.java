@@ -9,9 +9,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.LocalDateTime;
-import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -27,35 +27,38 @@ public class UserService {
      */
     public Mono<User> createUser(User user) {
         log.info("创建用户: {}", user.getUsername());
-
-        return userRepository.existsByUsername(user.getUsername())
-                .flatMap(exists -> {
-                    if (exists) {
-                        return Mono.error(new RuntimeException("用户名已存在"));
+        return Mono.zip(
+                        userRepository.existsByUsername(user.getUsername()),
+                        userRepository.existsByEmail(user.getEmail())
+                )
+                .flatMap(tuple -> {
+                    if (tuple.getT1() || tuple.getT2()) {
+                        return Mono.error(new RuntimeException("用户名或邮箱已存在"));
                     }
-                    return userRepository.existsByEmail(user.getEmail())
-                            .flatMap(existsEmail -> {
-                                if (existsEmail) {
-                                    return Mono.error(new RuntimeException("邮箱已存在"));
-                                }
+                    return Mono.just(true);
+                })
+                .flatMap(validated -> {
+                    User newUser = new User();
+                    newUser.setUsername(user.getUsername());
+                    newUser.setEmail(user.getEmail());
+                    newUser.setBio(user.getBio());
+                    newUser.setCreatedAt(LocalDateTime.now());
+                    newUser.setUpdatedAt(LocalDateTime.now());
 
-                                User newUser = new User();
-                                newUser.setUsername(user.getUsername());
-                                newUser.setEmail(user.getEmail());
-                                newUser.setBio(user.getBio());
-                                newUser.setCreatedAt(LocalDateTime.now());
-                                newUser.setUpdatedAt(LocalDateTime.now());
-
-                                // 加密密码
+                    // 使用 Mono.fromCallable 来处理密码加密过程
+                    return Mono.fromCallable(() -> {
                                 try {
                                     newUser.setPasswordEncoded(user.getPassword(), passwordUtils);
+                                    return newUser;
                                 } catch (IllegalArgumentException e) {
-                                    return Mono.error(new RuntimeException(e.getMessage()));
+                                    throw e; // 直接抛出业务异常
+                                } catch (Exception e) {
+                                    throw new RuntimeException("系统错误：密码加密失败", e);
                                 }
-
-                                return userRepository.save(newUser);
-                            });
-                });
+                            })
+                            .subscribeOn(Schedulers.boundedElastic());
+                })
+                .flatMap(userRepository::save);
     }
 
     /**
