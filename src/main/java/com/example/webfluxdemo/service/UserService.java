@@ -2,6 +2,7 @@ package com.example.webfluxdemo.service;
 
 import com.example.webfluxdemo.model.User;
 import com.example.webfluxdemo.repository.UserRepository;
+import com.example.webfluxdemo.security.PasswordUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -10,6 +11,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -18,6 +20,7 @@ import java.time.LocalDateTime;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordUtils passwordUtils;
 
     /**
      * 创建用户
@@ -35,12 +38,20 @@ public class UserService {
                                 if (existsEmail) {
                                     return Mono.error(new RuntimeException("邮箱已存在"));
                                 }
+
                                 User newUser = new User();
                                 newUser.setUsername(user.getUsername());
                                 newUser.setEmail(user.getEmail());
-                                newUser.setPassword(user.getPassword());
+                                newUser.setBio(user.getBio());
                                 newUser.setCreatedAt(LocalDateTime.now());
                                 newUser.setUpdatedAt(LocalDateTime.now());
+
+                                // 加密密码
+                                try {
+                                    newUser.setPasswordEncoded(user.getPassword(), passwordUtils);
+                                } catch (IllegalArgumentException e) {
+                                    return Mono.error(new RuntimeException(e.getMessage()));
+                                }
 
                                 return userRepository.save(newUser);
                             });
@@ -122,8 +133,15 @@ public class UserService {
                         }
                         existingUser.setUsername(user.getUsername());
                         existingUser.setEmail(user.getEmail());
+                        existingUser.setBio(user.getBio());
+
+                        // 加密新密码
                         if (user.getPassword() != null && !user.getPassword().isEmpty()) {
-                            existingUser.setPassword(user.getPassword());
+                            try {
+                                existingUser.setPasswordEncoded(user.getPassword(), passwordUtils);
+                            } catch (IllegalArgumentException e) {
+                                return Mono.error(new RuntimeException(e.getMessage()));
+                            }
                         }
                         existingUser.setUpdatedAt(LocalDateTime.now());
                         return userRepository.save(existingUser);
@@ -131,8 +149,15 @@ public class UserService {
         } else {
             existingUser.setUsername(user.getUsername());
             existingUser.setEmail(user.getEmail());
+            existingUser.setBio(user.getBio());
+
+            // 加密新密码
             if (user.getPassword() != null && !user.getPassword().isEmpty()) {
-                existingUser.setPassword(user.getPassword());
+                try {
+                    existingUser.setPasswordEncoded(user.getPassword(), passwordUtils);
+                } catch (IllegalArgumentException e) {
+                    return Mono.error(new RuntimeException(e.getMessage()));
+                }
             }
             existingUser.setUpdatedAt(LocalDateTime.now());
             return userRepository.save(existingUser);
